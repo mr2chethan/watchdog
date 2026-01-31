@@ -55,11 +55,13 @@ class AuditorAgent:
         self.reasoning_steps.append(log_entry)
         return log_entry
     
-    def run_audit(self, limit: int = None, batch_size: int = 20) -> Generator[dict, None, None]:
+    def run_audit(self, limit: int = None, min_batch_size: int = 20, max_batch_size: int = 30) -> Generator[dict, None, None]:
         """
-        Run the full governance audit in batches.
-        Yields findings as they are discovered (for streaming).
+        Run the full governance audit in dynamic batches.
+        Yields findings as they are discovered.
+        Batch size is randomized (min-max).
         """
+        import random
         self.findings = []
         self.reasoning_steps = []
         data = self._load_data()
@@ -72,24 +74,26 @@ class AuditorAgent:
         if limit:
             ga4_df = ga4_df.head(limit)
             
-        yield self._log_step(f"📊 Loaded {len(ga4_df)} GA4 records to analyze in batches of {batch_size}")
+        yield self._log_step(f"📊 Loaded {len(ga4_df)} GA4 records to analyze in dynamic batches.")
         
-        total_batches = (len(ga4_df) + batch_size - 1) // batch_size
+        total_records = len(ga4_df)
+        current_idx = 0
+        batch_count = 1
         
-        for batch_idx in range(total_batches):
-            start_idx = batch_idx * batch_size
-            end_idx = start_idx + batch_size
+        while current_idx < total_records:
+            current_batch_size = random.randint(min_batch_size, max_batch_size)
+            end_idx = min(current_idx + current_batch_size, total_records)
             
-            current_batch = ga4_df.iloc[start_idx:end_idx]
+            current_batch = ga4_df.iloc[current_idx:end_idx]
             
             yield {
                 "type": "batch_start", 
                 "agent": "Auditor",
-                "batch_id": batch_idx + 1, 
-                "total_batches": total_batches,
+                "batch_id": batch_count, 
+                "total_batches": "Unknown", 
                 "size": len(current_batch)
             }
-            yield self._log_step(f"📦 Processing Audit Batch {batch_idx + 1}/{total_batches} ({len(current_batch)} records)...")
+            yield self._log_step(f"📦 Processing Audit Batch {batch_count} ({len(current_batch)} records)...")
         
             # Check 1: PII in URLs
             for finding in self._check_pii_in_urls(current_batch): yield finding
@@ -115,8 +119,11 @@ class AuditorAgent:
             # Check 8: Cost Data Import
             for finding in self._check_cost_data_import(current_batch): yield finding
             
-            yield {"type": "batch_complete", "batch_id": batch_idx + 1}
+            yield {"type": "batch_complete", "batch_id": batch_count}
             time.sleep(0.5) # Simulate batch processing latency
+            
+            current_idx = end_idx
+            batch_count += 1
             
         yield self._log_step(f"✅ Auditor Agent completed. Found {len(self.findings)} governance issues.")
     

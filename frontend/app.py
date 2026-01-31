@@ -198,7 +198,7 @@ def run_audit_with_streaming(limit: int = 100):
         # Keep last 100 logs
         if len(st.session_state.logs) > 100:
             st.session_state.logs.pop(0)
-        log_container.markdown(f"<div class='agent-log'>{'<br>'.join(st.session_state.logs[-20:])}</div>", unsafe_allow_html=True)
+        log_container.markdown(f"<div class='agent-log'>{'<br>'.join(st.session_state.logs[-50:])}</div>", unsafe_allow_html=True)
 
     def update_stats(findings_list):
         p0 = len([f for f in findings_list if f.get('priority') == 'P0'])
@@ -214,15 +214,27 @@ def run_audit_with_streaming(limit: int = 100):
     update_logs("🚀 Entering Continuous Interleaved Mode...")
     progress_bar = st.progress(0, text="Initializing Agents...")
     
-    # Generators
-    tech_gen = technician.run_audit(limit=limit, batch_size=5)
-    audit_gen = auditor.run_audit(limit=limit, batch_size=5)
+    # Permanent Batch Status Indicator in Sidebar (Fixed position)
+    with st.sidebar:
+        st.divider()
+        st.markdown("### 🔄 Live Status")
+        batch_status_container = st.empty()
+        batch_status_container.info("Initializing...")
     
-    # Infinite Interleaved Loop
-    cycle_count = 1
+    # Generators (Dynamic Batch Size 20-30)
+    tech_gen = technician.run_audit(limit=limit, min_batch_size=20, max_batch_size=30)
+    audit_gen = auditor.run_audit(limit=limit, min_batch_size=20, max_batch_size=30)
+    
+    # Infinite Interleaved Loop with Monotonic Batch ID
+    global_batch_id = 1
     
     while True:
+        # Much slower simulation as requested
+        import random
+        sleep_time = random.randint(10, 15)
+        time.sleep(sleep_time)
         # --- Technician Agent Turn ---
+        batch_findings = []
         try:
             while True:
                 event = next(tech_gen)
@@ -230,31 +242,64 @@ def run_audit_with_streaming(limit: int = 100):
                 
                 if event_type == "finding":
                     st.session_state.findings.insert(0, event["data"]) # Add to top
+                    # Memory Cap: Keep only last 100 findings to prevent crash
+                    if len(st.session_state.findings) > 100:
+                        st.session_state.findings.pop()
+                    
+                    batch_findings.append(event["data"])
                     # Display finding if P0 or P1
                     if event["data"].get("priority") in ["P0", "P1"]:
                         with findings_container:
                             display_finding(event["data"])
                 
                 elif event_type == "batch_start":
-                    bid = event.get("batch_id")
-                    tot = event.get("total_batches")
-                    progress_bar.progress(bid / tot, text=f"🔧 Technician: Analyzing Batch {bid}/{tot}...")
+                    # Internal batch_id from agent is ignored for display
+                    # internal_id = event.get("batch_id")
+                    batch_size = event.get("size", 0)
+                    batch_status_container.info(f"**Batch #{global_batch_id}**\n\n📊 Size: {batch_size} rows")
+                    progress_bar.progress(1.0, text=f"🔧 Technician: Analyzing Batch #{global_batch_id} ({batch_size} rows)...")
                 
                 elif event.get("step"):
-                    update_logs(event["step"])
+                    update_logs(f"[Batch {global_batch_id}] 🔧 Technician Agent: {event['step']}")
                 
                 elif event_type == "batch_complete":
-                     # Switch to Auditor after one batch
                      break
                      
                 time.sleep(0.05)
                 
         except StopIteration:
-            update_logs(f"Note: Technician Agent completed cycle {cycle_count}. Restarting stream...")
-            tech_gen = technician.run_audit(limit=limit, batch_size=5)
+            update_logs(f"Note: Data source exhausted. Resetting Technician stream...")
+            tech_gen = technician.run_audit(limit=limit, min_batch_size=20, max_batch_size=30)
             time.sleep(0.5)
+            continue # Skip CFO for this partial/empty turn
+            
+        # Run CFO on Technician Batch Findings (Limited frequency to save API quota)
+        # Only run every 3rd batch OR if there are Critical (P0) issues
+        should_run_chob = (global_batch_id % 3 == 0) or any(f.get('priority') == 'P0' for f in batch_findings)
+        
+        if batch_findings and should_run_chob:
+             update_logs(f"💰 CFO Agent: Analyzing financial impact of Batch #{global_batch_id}...")
+             for event in cfo.analyze(batch_findings, batch_id=global_batch_id, batch_size=len(batch_findings)):
+                 if event.get("step"):
+                     # CFO steps already contain agent name, just show batch context if not redundant
+                     update_logs(f"[Batch {global_batch_id}] {event['step']}")
+                 if event.get("type") == "cfo_report":
+                     reportn = event["data"]
+                     b_size = reportn.get('batch_size', len(batch_findings))
+                     with findings_container:
+                         st.markdown(f"""
+                         <div style="background-color: #1e1e2e; padding: 15px; border-left: 5px solid #00ff00; margin: 10px 0;">
+                             <strong>💰 CFO Analysis (Batch #{global_batch_id} | {b_size} Records)</strong><br>
+                             {reportn.get('executive_narrative', 'No financial impact detected.')}
+                         </div>
+                         """, unsafe_allow_html=True)
+        elif batch_findings:
+             update_logs(f"💰 CFO Agent: Performing standard risk assessment for Batch #{global_batch_id} (Rapid Mode)")
+                         
+        global_batch_id += 1
         
         # --- Auditor Agent Turn ---
+        batch_findings = []
         try:
              while True:
                 event = next(audit_gen)
@@ -262,17 +307,19 @@ def run_audit_with_streaming(limit: int = 100):
                 
                 if event_type == "finding":
                     st.session_state.findings.insert(0, event["data"])
+                    if len(st.session_state.findings) > 100: st.session_state.findings.pop()
+                    batch_findings.append(event["data"])
                     if event["data"].get("priority") in ["P0", "P1"]:
                         with findings_container:
                             display_finding(event["data"])
 
                 elif event_type == "batch_start":
-                    bid = event.get("batch_id")
-                    tot = event.get("total_batches")
-                    progress_bar.progress(bid / tot, text=f"📋 Auditor: Analyzing Batch {bid}/{tot}...")
+                    batch_size = event.get("size", 0)
+                    batch_status_container.info(f"**Batch #{global_batch_id}**\n\n📊 Size: {batch_size} rows")
+                    progress_bar.progress(1.0, text=f"📋 Auditor: Analyzing Batch #{global_batch_id} ({batch_size} rows)...")
                 
                 elif event.get("step"):
-                    update_logs(event["step"])
+                    update_logs(f"[Batch {global_batch_id}] 📋 Auditor Agent: {event['step']}")
                     
                 elif event_type == "batch_complete":
                      break
@@ -280,13 +327,33 @@ def run_audit_with_streaming(limit: int = 100):
                 time.sleep(0.05)
         
         except StopIteration:
-            update_logs(f"Note: Auditor Agent completed cycle {cycle_count}. Restarting stream...")
-            audit_gen = auditor.run_audit(limit=limit, batch_size=5)
-            cycle_count += 1
+            update_logs(f"Note: Data source exhausted. Resetting Auditor stream...")
+            audit_gen = auditor.run_audit(limit=limit, min_batch_size=20, max_batch_size=30)
             time.sleep(0.5)
+            continue
+
+        # Run CFO on Auditor Batch Findings (Limited frequency)
+        should_run_audit_cfo = (global_batch_id % 3 == 0) or any(f.get('priority') == 'P0' for f in batch_findings)
+        
+        if batch_findings and should_run_audit_cfo:
+             update_logs(f"💰 CFO Agent: Analyzing governance risk of Batch #{global_batch_id}...")
+             for event in cfo.analyze(batch_findings, batch_id=global_batch_id, batch_size=len(batch_findings)):
+                 if event.get("step"):
+                     update_logs(f"[Batch {global_batch_id}] {event['step']}")
+                 if event.get("type") == "cfo_report":
+                     reportn = event["data"]
+                     b_size = reportn.get('batch_size', len(batch_findings))
+                     with findings_container:
+                         st.markdown(f"""
+                         <div style="background-color: #1e1e2e; padding: 15px; border-left: 5px solid #00ff00; margin: 10px 0;">
+                             <strong>💰 CFO Analysis (Batch #{global_batch_id} | {b_size} Records)</strong><br>
+                             {reportn.get('executive_narrative', 'No compliance risk details.')}
+                         </div>
+                         """, unsafe_allow_html=True)
+
+        global_batch_id += 1
 
         # Update global stats
-        # Cap session state to 200 findings to prevent memory explosion
         if len(st.session_state.findings) > 200:
              st.session_state.findings = st.session_state.findings[:200]
         
@@ -306,14 +373,10 @@ def main():
     with st.sidebar:
         st.header("⚙️ Configuration")
         
-        limit = st.slider(
-            "Records to Analyze",
-            min_value=10,
-            max_value=1000,
-            value=100,
-            step=10,
-            help="Number of records to process from each data source"
-        )
+        # Limit not used in infinite mode, set to None for full initial load
+        limit = None
+        
+        st.info("Running in Continuous Simulation Mode")
         
         st.divider()
         
@@ -328,10 +391,10 @@ def main():
         
         st.markdown("### 📁 Data Sources")
         st.markdown("""
-        - DV360 Audit Data (1000 rows)
-        - GTM Tag Data (1000 rows)
-        - GA4 Property Data (1000 rows)
-        - Website Scan Data (1000 rows)
+        - DV360 Audit Data
+        - GTM Tag Data
+        - GA4 Property Data
+        - Website Scan Data
         """)
     
     # Main content

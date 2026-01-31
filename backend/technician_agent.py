@@ -54,11 +54,13 @@ class TechnicianAgent:
         self.reasoning_steps.append(log_entry)
         return log_entry
     
-    def run_audit(self, limit: int = None, batch_size: int = 20) -> Generator[dict, None, None]:
+    def run_audit(self, limit: int = None, min_batch_size: int = 20, max_batch_size: int = 30) -> Generator[dict, None, None]:
         """
         Run the full audit using the decision tree logic in batches to simulate live stream.
         Yields findings as they are discovered.
+        Batch size is randomized (min-max).
         """
+        import random
         self.findings = []
         self.reasoning_steps = []
         data = self._load_data()
@@ -74,28 +76,30 @@ class TechnicianAgent:
             dv360_df = dv360_df.head(limit)
             website_df = website_df.head(limit)
 
-        yield self._log_step(f"📊 Loaded {len(dv360_df)} DV360 records to analyze in batches of {batch_size}")
+        yield self._log_step(f"📊 Loaded {len(dv360_df)} DV360 records to analyze in dynamic batches.")
 
         # Create batches
-        # We drive the main loop with DV360 data as "the stream"
-        total_batches = (len(dv360_df) + batch_size - 1) // batch_size
+        total_records = len(dv360_df)
+        current_idx = 0
+        batch_count = 1
         
-        for batch_idx in range(total_batches):
-            start_idx = batch_idx * batch_size
-            end_idx = start_idx + batch_size
+        while current_idx < total_records:
+            # Determine size for this batch
+            current_batch_size = random.randint(min_batch_size, max_batch_size)
+            end_idx = min(current_idx + current_batch_size, total_records)
             
             # Slice the dataframes to simulate a "batch" of new data arriving
-            current_dv360_batch = dv360_df.iloc[start_idx:end_idx]
-            current_website_batch = website_df.iloc[start_idx:end_idx] if start_idx < len(website_df) else pd.DataFrame()
+            current_dv360_batch = dv360_df.iloc[current_idx:end_idx]
+            current_website_batch = website_df.iloc[current_idx:end_idx] if current_idx < len(website_df) else pd.DataFrame()
             
             yield {
                 "type": "batch_start", 
                 "agent": "Technician",
-                "batch_id": batch_idx + 1, 
-                "total_batches": total_batches,
+                "batch_id": batch_count, 
+                "total_batches": "Unknown",
                 "size": len(current_dv360_batch)
             }
-            yield self._log_step(f"📦 Processing Batch {batch_idx + 1}/{total_batches} ({len(current_dv360_batch)} records)...")
+            yield self._log_step(f"📦 Processing Batch {batch_count} ({len(current_dv360_batch)} records)...")
         
             # Check 1: Pixel Created?
             for finding in self._check_pixel_created(current_dv360_batch): yield finding
@@ -116,8 +120,11 @@ class TechnicianAgent:
             # Check 7: GA4 Data Discrepancy? (Moved inside loop)
             for finding in self._check_ga4_discrepancy(current_dv360_batch, ga4_df): yield finding
             
-            yield {"type": "batch_complete", "batch_id": batch_idx + 1}
+            yield {"type": "batch_complete", "batch_id": batch_count}
             time.sleep(0.5)
+            
+            current_idx = end_idx
+            batch_count += 1
             
         # Check 6: Consent Settings? (Static Check)
         yield self._log_step("🔎 CHECK 6: Verifying consent settings in GTM (Static Config)...")
