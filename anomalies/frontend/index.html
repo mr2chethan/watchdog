@@ -1,0 +1,630 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Account Health Dashboard</title>
+
+  <style>
+    :root{
+      --panel: rgba(255,255,255,0.06);
+      --panel2: rgba(255,255,255,0.08);
+      --stroke: rgba(255,255,255,0.10);
+      --text: rgba(255,255,255,0.92);
+      --muted: rgba(255,255,255,0.65);
+      --shadow: 0 10px 30px rgba(0,0,0,.35);
+      --radius: 18px;
+    }
+    body{
+      margin:0;
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
+      background:
+        radial-gradient(1200px 600px at 20% 0%, rgba(99,102,241,0.35), transparent 60%),
+        radial-gradient(900px 500px at 100% 20%, rgba(34,197,94,0.25), transparent 55%),
+        radial-gradient(800px 500px at 70% 100%, rgba(14,165,233,0.25), transparent 55%),
+        linear-gradient(180deg, #070b14 0%, #0b1220 50%, #070b14 100%);
+      color: var(--text);
+    }
+    .container{ max-width: 1240px; margin: 0 auto; padding: 18px; }
+    .grid{ display:grid; gap:14px; }
+    .grid-2{ grid-template-columns: 1.15fr 1.35fr; }
+    .grid-4{ grid-template-columns: repeat(4, 1fr); }
+    .grid-3{ grid-template-columns: repeat(3, 1fr); }
+    @media (max-width: 980px){
+      .grid-2{ grid-template-columns: 1fr; }
+      .grid-4{ grid-template-columns: repeat(2, 1fr); }
+    }
+    .card{
+      background: var(--panel);
+      border: 1px solid var(--stroke);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 16px 18px;
+    }
+    .section-title{
+      font-size: 14px;
+      text-transform: uppercase;
+      letter-spacing: .10em;
+      color: rgba(255,255,255,0.70);
+      margin: 8px 0 10px 0;
+    }
+    .muted { color: var(--muted); }
+    .row{ display:flex; justify-content:space-between; align-items:flex-start; gap:12px; }
+    .spacer{ height: 14px; }
+    .pill{
+      display:inline-flex; align-items:center; gap:8px;
+      padding: 6px 10px;
+      border-radius: 999px;
+      border: 1px solid rgba(255,255,255,0.14);
+      background: rgba(255,255,255,0.06);
+      font-size: 12px;
+      color: rgba(255,255,255,0.86);
+      white-space:nowrap;
+    }
+    .dot{ width:8px; height:8px; border-radius:50%; }
+    .dot.good{ background:#22c55e; box-shadow: 0 0 0 3px rgba(34,197,94,0.15); }
+    .dot.fair{ background:#f59e0b; box-shadow: 0 0 0 3px rgba(245,158,11,0.15); }
+    .dot.poor{ background:#ef4444; box-shadow: 0 0 0 3px rgba(239,68,68,0.15); }
+    .dot.excellent{ background:#60a5fa; box-shadow: 0 0 0 3px rgba(96,165,250,0.15); }
+
+    .toolbar{
+      display:flex; gap:12px; align-items:center; justify-content:flex-end;
+      flex-wrap: wrap;
+    }
+
+    .btn{
+      display:inline-block;
+      padding:10px 12px;
+      border-radius: 14px;
+      text-decoration:none;
+      border:1px solid rgba(255,255,255,0.16);
+      background: rgba(255,255,255,0.06);
+      color: rgba(255,255,255,0.92);
+      font-weight: 650;
+    }
+    .btn-gtm{ border-color: rgba(34,197,94,0.45); background: rgba(34,197,94,0.18); }
+    .btn-ga4{ border-color: rgba(239,68,68,0.45); background: rgba(239,68,68,0.16); }
+    .btn-apply{ border-color: rgba(96,165,250,0.40); background: rgba(96,165,250,0.14); cursor:pointer; }
+
+    .metric-title { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; }
+    .metric-value { font-size: 28px; font-weight: 800; margin-top: 6px; }
+    .metric-sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
+
+    .table{
+      width:100%;
+      border-collapse: collapse;
+      overflow:hidden;
+      border-radius: 16px;
+    }
+    .table th, .table td{
+      padding: 10px 10px;
+      border-bottom: 1px solid rgba(255,255,255,0.08);
+      font-size: 13px;
+    }
+    .table th{
+      text-align:left;
+      color: rgba(255,255,255,0.75);
+      font-weight: 700;
+      background: rgba(255,255,255,0.04);
+    }
+
+    /* Overlay */
+    .overlay{
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,0.50);
+      backdrop-filter: blur(6px);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 9999;
+      padding: 18px;
+    }
+    .overlay.show{ display:flex; }
+    .overlay-card{
+      width: min(860px, 94vw);
+      background: rgba(10, 16, 30, 0.92);
+      border: 1px solid rgba(255,255,255,0.14);
+      border-radius: 20px;
+      box-shadow: 0 12px 38px rgba(0,0,0,.45);
+      padding: 20px 22px;
+    }
+    .spinner{
+      width: 18px; height: 18px;
+      border-radius: 50%;
+      border: 3px solid rgba(255,255,255,0.18);
+      border-top-color: rgba(96,165,250,0.95);
+      animation: spin 0.9s linear infinite;
+    }
+    @keyframes spin{ to { transform: rotate(360deg); } }
+    .err{
+      margin-top: 14px;
+      padding: 12px;
+      border-radius: 14px;
+      border: 1px solid rgba(239,68,68,0.45);
+      background: rgba(239,68,68,0.12);
+      display:none;
+      white-space: pre-wrap;
+      font-size: 13px;
+      color: rgba(255,255,255,0.92);
+    }
+
+    .ai-box{
+      border: 1px solid rgba(96,165,250,0.22);
+      background: rgba(96,165,250,0.06);
+    }
+    .ai-placeholder{
+      margin-top: 10px;
+      padding: 10px 12px;
+      border-radius: 14px;
+      border: 1px dashed rgba(96,165,250,0.35);
+      background: rgba(96,165,250,0.08);
+      color: rgba(255,255,255,0.85);
+      font-size: 13px;
+      display:flex;
+      gap:10px;
+      align-items:center;
+    }
+    .tinyspin{
+      width: 14px; height: 14px;
+      border-radius: 50%;
+      border: 3px solid rgba(255,255,255,0.18);
+      border-top-color: rgba(96,165,250,0.95);
+      animation: spin 0.9s linear infinite;
+    }
+
+    /* Summary tab */
+    .summary-grid{
+      display:grid;
+      grid-template-columns: 1.25fr 1fr;
+      gap: 14px;
+    }
+    @media (max-width: 980px){
+      .summary-grid{ grid-template-columns: 1fr; }
+    }
+    .summary-kpis{
+      display:grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+    }
+    @media (max-width: 980px){
+      .summary-kpis{ grid-template-columns: repeat(2, 1fr); }
+    }
+    .kpi{
+      background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,255,255,0.10);
+      border-radius: 16px;
+      padding: 12px 12px;
+    }
+    .kpi .v{ font-size: 22px; font-weight: 850; margin-top: 4px; }
+    .kpi .l{ font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: rgba(255,255,255,0.65); }
+  </style>
+</head>
+
+<body>
+  <div class="overlay" id="overlay">
+    <div class="overlay-card">
+      <div class="pill"><span class="dot excellent"></span><span>AI Mode</span></div>
+      <div style="height:10px;"></div>
+      <div style="font-size:34px; font-weight:900; letter-spacing:-0.02em; line-height:1.15;">
+        Dashboard loaded...
+      </div>
+      <div class="muted" style="margin-top:10px; font-size:14px;">
+        We’re generating AI based Decisions to improve you account health!
+      </div>
+
+      <div style="display:flex; gap:12px; align-items:center; margin-top:16px;">
+        <div class="spinner"></div>
+        <div class="muted" id="overlayStatus">Starting…</div>
+      </div>
+
+      <div class="err" id="overlayErr"></div>
+    </div>
+  </div>
+
+  <div class="container">
+    <div class="card">
+      <div class="row">
+        <div>
+          <div class="section-title">Account Health • Fix AI Agent </div>
+          <div style="font-size:34px; font-weight:900; line-height:1.15;">
+            Problem → Cause → Fix (with action buttons)
+          </div>
+          <div class="muted" style="margin-top:8px; font-size:14px;">
+            Fast dashboard + Generating AI Agent Insights...
+          </div>
+        </div>
+
+        <div class="pill" title="Local LLM: Ollama (gemma3)">
+          <span class="dot excellent"></span><span>LLM Ready</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="spacer"></div>
+
+    <div class="card">
+      <form method="get" class="row" style="align-items:center;">
+        <div style="display:flex; gap:10px; align-items:center;">
+          <div class="muted" style="font-size:13px;">Advertiser</div>
+          <select name="adv_id" id="advSelect">
+            {% for r in opts %}
+              <option value="{{ r['Advertiser ID'] }}" {% if r['Advertiser ID'] == adv_id %}selected{% endif %}>
+                {{ r['Advertiser'] }} | {{ r['Advertiser ID'] }}
+              </option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="toolbar">
+          <input type="hidden" name="use_llm" value="1" />
+          <div class="pill" title="Always enabled">
+            <span class="dot excellent"></span><span>AI summaries enabled</span>
+          </div>
+          <button class="btn btn-apply" type="submit">Apply</button>
+        </div>
+      </form>
+    </div>
+
+    <div class="spacer"></div>
+
+    <div class="grid grid-4">
+      <div class="card">
+        <div class="row">
+          <div>
+            <div class="metric-title">Health Score</div>
+            <div class="metric-value">{{ health.score }}/100</div>
+            <div class="metric-sub">Band: {{ health.band }}</div>
+          </div>
+          <div class="pill">
+            <span class="dot {{ dot_class }}"></span><span>{{ health.band }}</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="metric-title">Spike Days</div>
+        <div class="metric-value">{{ health.spike_days }}</div>
+        <div class="metric-sub">Days with spike flags</div>
+      </div>
+
+      <!-- ✅ Changed as requested -->
+      <div class="card">
+        <div class="metric-title">Missing Events</div>
+        <div class="metric-value">{{ missing_events_total }}</div>
+        <div class="metric-sub">Total missing rows (activity × date)</div>
+      </div>
+
+      <div class="card">
+        <div class="metric-title">Days in Window</div>
+        <div class="metric-value">{{ health.days_in_window }}</div>
+        <div class="metric-sub">Distinct GA4 dates</div>
+      </div>
+    </div>
+
+    <div class="spacer"></div>
+
+    <!-- ✅ NEW OVERALL SUMMARY TAB -->
+    <div class="card" style="padding:18px 18px;">
+      <div class="row" style="align-items:center;">
+        <div>
+          <div class="section-title">Overall Summary</div>
+          <div style="font-size:26px; font-weight:950; line-height:1.2;">
+            {{ overall_summary.adv_name }} — Tracking reliability snapshot
+          </div>
+          <div class="muted" style="margin-top:8px; font-size:14px;">
+            Includes overall floodlight activity coverage, missing delivery intensity, spike behavior, and where spikes were driven from (GA4 channel dominance).
+          </div>
+        </div>
+        <div class="pill">
+          <span class="dot {{ dot_class }}"></span><span>{{ overall_summary.verdict }}</span>
+        </div>
+      </div>
+
+      <div style="height:12px;"></div>
+
+      <div class="summary-grid">
+        <div>
+          <div class="summary-kpis">
+            <div class="kpi">
+              <div class="l">Total activities</div>
+              <div class="v">{{ overall_summary.total_activities }}</div>
+            </div>
+            <div class="kpi">
+              <div class="l">Missing events</div>
+              <div class="v">{{ overall_summary.missing_events_total }}</div>
+            </div>
+            <div class="kpi">
+              <div class="l">Spike rows</div>
+              <div class="v">{{ overall_summary.spike_rows_total }}</div>
+            </div>
+            <div class="kpi">
+              <div class="l">Latest issue</div>
+              <div class="v" style="font-size:16px;">
+                {% if overall_summary.last_missing_date %}M: {{ overall_summary.last_missing_date }}{% else %}M: —{% endif %}<br/>
+                {% if overall_summary.last_spike_date %}S: {{ overall_summary.last_spike_date }}{% else %}S: —{% endif %}
+              </div>
+            </div>
+          </div>
+
+          <div style="height:12px;"></div>
+
+          <div style="padding:12px 14px; border-radius:16px; border:1px solid rgba(255,255,255,0.10); background: rgba(255,255,255,0.04);">
+            <div style="font-weight:900; font-size:14px;">Reliability verdict</div>
+            <div class="muted" style="margin-top:6px; font-size:13px;">
+              {{ overall_summary.verdict_reason }}
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <div style="font-weight:900; font-size:14px;">Spike drivers (GA4 dominant channel on spike dates)</div>
+          <div class="muted" style="font-size:12px; margin-top:6px;">
+            This is inferred from GA4 sampled sessions on the spike dates.
+          </div>
+
+          <div style="margin-top:10px;">
+            {% if overall_summary.top_drivers and overall_summary.top_drivers|length > 0 %}
+              <table class="table">
+                <thead>
+                  <tr>
+                    <th>Channel</th>
+                    <th>Spike days</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for r in overall_summary.top_drivers %}
+                    <tr>
+                      <td>{{ r.channel }}</td>
+                      <td>{{ r.spike_days }}</td>
+                    </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            {% else %}
+              <div class="muted">No GA4 channel driver inference available (no spike dates or no GA4 rows).</div>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+
+      <div style="height:12px;"></div>
+
+      {% if charts.issue_history %}
+        <div class="card" style="margin-top:10px;">{{ charts.issue_history | safe }}</div>
+      {% endif %}
+    </div>
+
+    <div class="spacer"></div>
+
+    <div class="grid grid-2">
+      <div class="card ai-box">
+        <div class="row">
+          <div style="font-size:16px; font-weight:900;">🛑 Missing Floodlights — AI Summary</div>
+          <div class="pill"><span class="dot poor"></span><span>{{ missing_count }} ranges • {{ missing_activities }} activities</span></div>
+        </div>
+
+        <div class="ai-placeholder" id="missing-ai-placeholder">
+          <div class="tinyspin"></div>
+          <div>Generating AI summary for Missing Floodlights…</div>
+        </div>
+
+        <div id="missing-ai-content" style="display:none"></div>
+        <div style="margin-top:12px;" id="missing-ai-cta"></div>
+      </div>
+
+      <div class="card ai-box">
+        <div class="row">
+          <div style="font-size:16px; font-weight:900;">🔎 Spikes — AI Summary</div>
+          <div class="pill"><span class="dot fair"></span><span>{{ spike_count }} spikes • {{ spike_days }} days</span></div>
+        </div>
+
+        <div class="ai-placeholder" id="spike-ai-placeholder">
+          <div class="tinyspin"></div>
+          <div>Generating AI summary for Spikes…</div>
+        </div>
+
+        <div id="spike-ai-content" style="display:none"></div>
+        <div style="margin-top:12px;" id="spike-ai-cta"></div>
+      </div>
+    </div>
+
+    <div class="spacer"></div>
+
+    <div class="grid grid-2">
+      <div>
+        <div class="section-title">Detected problems</div>
+
+        <div class="card">
+          <div style="font-weight:850;">🔎 Sudden spikes (exact date + impressions)</div>
+          <div style="margin-top:10px;">{{ spike_table_html | safe }}</div>
+        </div>
+
+        <div class="spacer"></div>
+
+        <div class="card">
+          <div style="font-weight:850;">🛑 Floodlights not working (missing ranges)</div>
+          <div style="margin-top:10px;">{{ missing_table_html | safe }}</div>
+        </div>
+      </div>
+
+      <div>
+        <div class="section-title">Trends & channel mix</div>
+
+
+        {% if charts.ga4_impr %}
+          <div class="card">{{ charts.ga4_impr | safe }}</div>
+          <div class="spacer"></div>
+        {% else %}
+          <div class="card">No GA4 impressions trend available for this advertiser.</div>
+          <div class="spacer"></div>
+        {% endif %}
+
+        {% if totals %}
+          <div class="section-title">Channel totals</div>
+          <div class="grid grid-4" style="grid-template-columns: repeat(5, 1fr);">
+            {% for ch in CHANNELS_ORDER %}
+              <div class="card">
+                <div class="metric-title">{{ ch }}</div>
+                <div class="metric-value">{{ "{:,}".format(totals[ch]|int) }}</div>
+                <div class="metric-sub">Sessions (sampled)</div>
+              </div>
+            {% endfor %}
+          </div>
+          <div class="spacer"></div>
+        {% endif %}
+
+        {% if charts.channels %}
+          <div class="card">{{ charts.channels | safe }}</div>
+          <div class="spacer"></div>
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="spacer"></div>
+
+    <div class="section-title">Exports</div>
+    <div class="card">
+      <div class="grid grid-3">
+        <a class="btn" href="/export/ga4?adv_id={{ adv_id }}">⬇️ GA4 rows (this advertiser)</a>
+        <a class="btn" href="/export/spikes?adv_id={{ adv_id }}">⬇️ Spikes (this advertiser)</a>
+        <a class="btn" href="/export/missing?adv_id={{ adv_id }}">⬇️ Missing (this advertiser)</a>
+      </div>
+    </div>
+
+    <div class="spacer"></div>
+  </div>
+
+<script id="page-data" type="application/json">
+{
+  "USE_LLM_ON_LOAD": true,
+  "ADV_ID_ON_LOAD": {{ adv_id | tojson }},
+  "GTM_URL": {{ GTM_URL | tojson }},
+  "GA4_URL": {{ GA4_URL | tojson }}
+}
+</script>
+
+<script>
+  // ✅ FIX: define variables from page-data JSON
+  const PAGE = JSON.parse(document.getElementById("page-data").textContent || "{}");
+  const USE_LLM_ON_LOAD = !!PAGE.USE_LLM_ON_LOAD;
+  const ADV_ID_ON_LOAD = PAGE.ADV_ID_ON_LOAD;
+  const GTM_URL = PAGE.GTM_URL;
+  const GA4_URL = PAGE.GA4_URL;
+
+  const overlay = document.getElementById("overlay");
+  const overlayStatus = document.getElementById("overlayStatus");
+  const overlayErr = document.getElementById("overlayErr");
+
+  const missingPlaceholder = document.getElementById("missing-ai-placeholder");
+  const spikePlaceholder = document.getElementById("spike-ai-placeholder");
+
+  const missingContent = document.getElementById("missing-ai-content");
+  const spikeContent = document.getElementById("spike-ai-content");
+
+  const missingCTA = document.getElementById("missing-ai-cta");
+  const spikeCTA = document.getElementById("spike-ai-cta");
+
+  async function startJob(advId){
+    overlayStatus.textContent = " Starting AI Agent's recommendation generation…";
+    const res = await fetch("/start_job", {
+      method: "POST",
+      headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({adv_id: advId})
+    });
+    const data = await res.json();
+    return data.job_id;
+  }
+
+  async function pollAndInject(jobId){
+    overlayStatus.textContent = "Generating solution and summaries…";
+
+    const tick = async () => {
+      const r = await fetch(`/job_status?job_id=${encodeURIComponent(jobId)}`);
+      const j = await r.json();
+
+      if (j.status === "done") {
+        const res = await fetch(`/job_result?job_id=${encodeURIComponent(jobId)}`);
+        const data = await res.json();
+        const result = data.result || {};
+        const miss = result.missing || null;
+        const spike = result.spike || null;
+
+        // Missing
+        if (miss) {
+          if (missingPlaceholder) missingPlaceholder.style.display = "none";
+          missingContent.style.display = "block";
+
+          const recs = (miss.recommendations || []).slice(0,6).map(x => `<li>${x}</li>`).join("");
+          missingContent.innerHTML = `
+            <div style="margin-top:8px;"><b>Summary:</b> ${miss.summary || ""}</div>
+            <div style="margin-top:8px;"><b>Likely root cause:</b> ${miss.likely_root_cause || ""}</div>
+            <div style="margin-top:8px;"><b>Recommendations:</b>
+              <ul style="margin:6px 0 0 0; padding-left:18px;">${recs}</ul>
+            </div>
+          `;
+
+          if ((miss.cta || {}).type === "GTM") {
+            missingCTA.innerHTML = `<a class="btn btn-gtm" href="${GTM_URL}" target="_blank">🟢 ${(miss.cta||{}).label || "Go to Google Tag Manager →"}</a>`;
+          } else {
+            missingCTA.innerHTML = "";
+          }
+        }
+
+        // Spikes
+        if (spike) {
+          if (spikePlaceholder) spikePlaceholder.style.display = "none";
+          spikeContent.style.display = "block";
+
+          const recs = (spike.recommendations || []).slice(0,6).map(x => `<li>${x}</li>`).join("");
+          spikeContent.innerHTML = `
+            <div style="margin-top:8px;"><b>Summary:</b> ${spike.summary || ""}</div>
+            <div style="margin-top:8px;"><b>Likely root cause:</b> ${spike.likely_root_cause || ""}</div>
+            <div style="margin-top:8px;"><b>Recommendations:</b>
+              <ul style="margin:6px 0 0 0; padding-left:18px;">${recs}</ul>
+            </div>
+          `;
+
+          if ((spike.cta || {}).type === "GA4") {
+            spikeCTA.innerHTML = `<a class="btn btn-ga4" href="${GA4_URL}" target="_blank">🔴 ${(spike.cta||{}).label || "Go to GA4 Analytics →"}</a>`;
+          } else {
+            spikeCTA.innerHTML = "";
+          }
+        }
+
+        overlay.classList.remove("show");
+        return;
+      }
+
+      if (j.status === "error") {
+        overlayStatus.textContent = "AI generation failed.";
+        overlayErr.style.display = "block";
+        overlayErr.textContent = j.error || "Unknown error.";
+        return;
+      }
+
+      setTimeout(tick, 900);
+    };
+
+    tick();
+  }
+
+  window.addEventListener("load", async () => {
+    if (!USE_LLM_ON_LOAD) return;
+
+    overlayErr.style.display = "none";
+    overlayErr.textContent = "";
+    overlay.classList.add("show");
+
+    try{
+      const jobId = await startJob(ADV_ID_ON_LOAD);
+      await pollAndInject(jobId);
+    }catch(err){
+      overlayStatus.textContent = "Failed to start AI job.";
+      overlayErr.style.display = "block";
+      overlayErr.textContent = (err && err.stack) ? err.stack : String(err);
+    }
+  });
+</script>
+
+</body>
+</html>

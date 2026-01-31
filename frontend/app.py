@@ -11,6 +11,7 @@ Features:
 """
 import streamlit as st
 import time
+import json
 from datetime import datetime
 import pandas as pd
 import sys
@@ -24,17 +25,20 @@ sys.path.insert(0, str(backend_path))
 TechnicianAgent = None
 AuditorAgent = None
 CFOAgent = None
+AnomalyAgent = None
 
 def load_agents():
     """Lazy load agents to avoid import issues during startup."""
-    global TechnicianAgent, AuditorAgent, CFOAgent
+    global TechnicianAgent, AuditorAgent, CFOAgent, AnomalyAgent
     if TechnicianAgent is None:
         from technician_agent import TechnicianAgent as TA
         from auditor_agent import AuditorAgent as AA
         from cfo_agent import CFOAgent as CA
+        from anomaly_agent import AnomalyAgent as AnomA
         TechnicianAgent = TA
         AuditorAgent = AA
         CFOAgent = CA
+        AnomalyAgent = AnomA
 
 # Page config
 st.set_page_config(
@@ -44,11 +48,15 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS for better styling
+# Custom CSS - matching friend's dark gradient design
 st.markdown("""
 <style>
     .stApp {
-        background-color: #0e1117;
+        background:
+            radial-gradient(1200px 600px at 20% 0%, rgba(99,102,241,0.35), transparent 60%),
+            radial-gradient(900px 500px at 100% 20%, rgba(34,197,94,0.25), transparent 55%),
+            radial-gradient(800px 500px at 70% 100%, rgba(14,165,233,0.25), transparent 55%),
+            linear-gradient(180deg, #070b14 0%, #0b1220 50%, #070b14 100%);
     }
     .finding-p0 {
         background-color: #ff4b4b;
@@ -82,25 +90,115 @@ st.markdown("""
         overflow-y: auto;
     }
     .health-score-good {
-        color: #00ff00;
+        color: #22c55e;
         font-size: 48px;
         font-weight: bold;
     }
     .health-score-warning {
-        color: #ffa500;
+        color: #f59e0b;
         font-size: 48px;
         font-weight: bold;
     }
     .health-score-critical {
-        color: #ff4b4b;
+        color: #ef4444;
         font-size: 48px;
         font-weight: bold;
     }
     .metric-card {
-        background-color: #1e1e2e;
+        background: rgba(255,255,255,0.06);
+        border: 1px solid rgba(255,255,255,0.10);
         padding: 20px;
-        border-radius: 10px;
+        border-radius: 18px;
         text-align: center;
+        box-shadow: 0 10px 30px rgba(0,0,0,.35);
+    }
+    /* Friend's design elements */
+    .anomaly-card {
+        background: rgba(255,255,255,0.06);
+        border: 1px solid rgba(255,255,255,0.10);
+        border-radius: 18px;
+        box-shadow: 0 10px 30px rgba(0,0,0,.35);
+        padding: 16px 18px;
+        margin: 8px 0;
+    }
+    .ai-box {
+        border: 1px solid rgba(96,165,250,0.22);
+        background: rgba(96,165,250,0.06);
+        border-radius: 18px;
+        padding: 16px 18px;
+        margin: 8px 0;
+    }
+    .pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 12px;
+        border-radius: 999px;
+        border: 1px solid rgba(255,255,255,0.14);
+        background: rgba(255,255,255,0.06);
+        font-size: 12px;
+        color: rgba(255,255,255,0.86);
+    }
+    .dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        display: inline-block;
+    }
+    .dot-excellent { background: #60a5fa; box-shadow: 0 0 0 3px rgba(96,165,250,0.15); }
+    .dot-good { background: #22c55e; box-shadow: 0 0 0 3px rgba(34,197,94,0.15); }
+    .dot-fair { background: #f59e0b; box-shadow: 0 0 0 3px rgba(245,158,11,0.15); }
+    .dot-poor { background: #ef4444; box-shadow: 0 0 0 3px rgba(239,68,68,0.15); }
+    .kpi-card {
+        background: rgba(255,255,255,0.05);
+        border: 1px solid rgba(255,255,255,0.10);
+        border-radius: 16px;
+        padding: 12px;
+        text-align: center;
+    }
+    .kpi-value {
+        font-size: 28px;
+        font-weight: 800;
+        margin-top: 4px;
+    }
+    .kpi-label {
+        font-size: 11px;
+        letter-spacing: .08em;
+        text-transform: uppercase;
+        color: rgba(255,255,255,0.65);
+    }
+    .section-title {
+        font-size: 14px;
+        text-transform: uppercase;
+        letter-spacing: .10em;
+        color: rgba(255,255,255,0.70);
+        margin: 8px 0 10px 0;
+    }
+    .verdict-box {
+        padding: 12px 14px;
+        border-radius: 16px;
+        border: 1px solid rgba(255,255,255,0.10);
+        background: rgba(255,255,255,0.04);
+    }
+    .btn-gtm {
+        display: inline-block;
+        padding: 10px 14px;
+        border-radius: 14px;
+        text-decoration: none;
+        border: 1px solid rgba(34,197,94,0.45);
+        background: rgba(34,197,94,0.18);
+        color: white;
+        font-weight: 650;
+    }
+    .btn-ga4 {
+        display: inline-block;
+        padding: 10px 14px;
+        border-radius: 14px;
+        text-decoration: none;
+        border: 1px solid rgba(239,68,68,0.45);
+        background: rgba(239,68,68,0.16);
+        color: white;
+        font-weight: 650;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -385,6 +483,7 @@ def main():
         - **Technician**: Decision tree walker (DV360/GTM/Website)
         - **Auditor**: Governance rules checker (GA4)
         - **CFO**: Financial impact narrator (LLM)
+        - **Anomaly**: Data quality monitor (Floodlight/GA4)
         """)
         
         st.divider()
@@ -395,150 +494,324 @@ def main():
         - GTM Tag Data
         - GA4 Property Data
         - Website Scan Data
+        - Floodlight Reports
         """)
     
-    # Main content
-    run_button = st.button("🚀 Run Account Audit", type="primary", use_container_width=True)
+    # Main content - TABBED INTERFACE
+    main_tab1, main_tab2 = st.tabs(["🔧 Setup & Tracking Audit", "📈 Data Anomaly Detection"])
     
-    if run_button:
-        with st.spinner("Running audit..."):
-            findings, cfo_report = run_audit_with_streaming(limit=limit)
+    # ============================================
+    # TAB 1: SETUP & TRACKING AUDIT (Original)
+    # ============================================
+    with main_tab1:
+        run_button = st.button("🚀 Run Account Audit", type="primary", use_container_width=True, key="run_audit_btn")
         
-        st.divider()
+        if run_button:
+            # Continuous streaming mode - runs indefinitely displaying findings live
+            run_audit_with_streaming(limit=limit)
         
-        # Results Dashboard
-        if cfo_report:
-            st.header("📊 Audit Results")
+        else:
+            # Show placeholder content when not running
+            st.info("👆 Click 'Run Account Audit' to start continuous account monitoring.")
             
-            # Health Score and Key Metrics
-            col1, col2, col3, col4 = st.columns(4)
+            st.markdown("""
+            ### What Watchdog Checks:
             
-            with col1:
-                health_score = cfo_report.get('health_score', 0)
-                score_color = get_health_score_color(health_score)
-                st.markdown(f"""
-                <div class='metric-card'>
-                    <div class='{score_color}'>{health_score}</div>
-                    <div>Health Score</div>
+            **🔧 Technical Issues (Technician Agent)**
+            - Missing or dead Floodlight pixels
+            - Cookie consent blocking data
+            - GTM and DV360 ID mismatches
+            - Counting method discrepancies
+            - Blocked network calls
+            
+            **📋 Governance Issues (Auditor Agent)**
+            - PII in URL parameters (GDPR risk)
+            - Data retention settings
+            - Google Signals configuration
+            - Campaign naming conventions
+            - Referral exclusion lists
+            - Consent Mode status
+            
+            **💰 Financial Impact (CFO Agent)**
+            - Calculates daily spend at risk
+            - Generates executive narratives
+            - Prioritizes fixes by business impact
+            """)
+    
+    # ============================================
+    # TAB 2: DATA ANOMALY DETECTION (Friend's Design)
+    # ============================================
+    with main_tab2:
+        # Load agents
+        load_agents()
+        
+        try:
+            anomaly_agent = AnomalyAgent()
+            advertisers = anomaly_agent.get_advertisers()
+            
+            if not advertisers:
+                st.warning("No advertisers found in the data files.")
+            else:
+                # Header card matching friend's design
+                st.markdown("""
+                <div class='anomaly-card'>
+                    <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+                        <div>
+                            <div class='section-title'>Account Health • Fix AI Agent</div>
+                            <div style="font-size:28px; font-weight:900; line-height:1.15;">
+                                Problem → Cause → Fix
+                            </div>
+                            <div style="margin-top:8px; font-size:14px; color: rgba(255,255,255,0.65);">
+                                Fast dashboard + AI Agent Insights for Floodlight anomalies
+                            </div>
+                        </div>
+                        <div class='pill'>
+                            <span class='dot dot-excellent'></span>
+                            <span>LLM Ready</span>
+                        </div>
+                    </div>
                 </div>
                 """, unsafe_allow_html=True)
-            
-            with col2:
-                st.metric(
-                    "🔴 Critical Issues",
-                    cfo_report.get('p0_count', 0),
-                    delta=None
-                )
-            
-            with col3:
-                st.metric(
-                    "🟡 High Priority",
-                    cfo_report.get('p1_count', 0),
-                    delta=None
-                )
-            
-            with col4:
-                monthly_risk = cfo_report.get('financial_risk', {}).get('monthly_risk', 0)
-                st.metric(
-                    "💰 Monthly Risk",
-                    f"${monthly_risk:,.0f}",
-                    delta=None
-                )
-            
-            st.divider()
-            
-            # Executive Narrative
-            st.header("📝 Executive Summary")
-            narrative = cfo_report.get('executive_narrative', 'No narrative generated.')
-            st.error(narrative)  # Using error box for dramatic effect
-            
-            st.divider()
-        
-        # Findings List
-        if findings:
-            st.header(f"🔍 Findings ({len(findings)} issues)")
-            
-            # Filter tabs
-            tab1, tab2, tab3, tab4 = st.tabs(["🔴 Critical (P0)", "🟡 High (P1)", "🟢 Medium (P2)", "📋 All"])
-            
-            with tab1:
-                p0_findings = [f for f in findings if f.get('priority') == 'P0']
-                if p0_findings:
-                    for finding in p0_findings:
-                        display_finding(finding)
+                
+                # Advertiser selector
+                adv_options = {f"{a['Advertiser']} | {a['Advertiser ID']}": a['Advertiser ID'] for a in advertisers}
+                selected_adv = st.selectbox("Select Advertiser", list(adv_options.keys()), key="adv_selector")
+                adv_id = adv_options[selected_adv]
+                
+                # Run analysis button
+                if st.button("🔍 Analyze Data Anomalies", type="primary", use_container_width=True, key="run_anomaly_btn"):
+                    
+                    # Log container
+                    log_placeholder = st.empty()
+                    logs = []
+                    
+                    # Run analysis
+                    report_data = None
+                    for event in anomaly_agent.analyze(adv_id):
+                        if event.get("type") == "step":
+                            logs.append(f"[{datetime.now().strftime('%H:%M:%S')}] {event['step']}")
+                            log_placeholder.markdown(f"<div class='agent-log'>{'<br>'.join(logs[-10:])}</div>", unsafe_allow_html=True)
+                            time.sleep(0.1)
+                        elif event.get("type") == "anomaly_report":
+                            report_data = event["data"]
+                    
+                    if report_data:
+                        log_placeholder.empty()
+                        
+                        health = report_data["health"]
+                        summary = report_data["overall_summary"]
+                        
+                        # Get dot class based on health band
+                        band = health.get("band", "").lower()
+                        dot_class = "dot-excellent" if "excellent" in band else ("dot-good" if "good" in band else ("dot-fair" if "fair" in band else "dot-poor"))
+                        score_class = "health-score-good" if health["score"] >= 75 else ("health-score-warning" if health["score"] >= 55 else "health-score-critical")
+                        
+                        # KPI Cards row (matching friend's grid-4)
+                        st.markdown("<div class='section-title'>Key Metrics</div>", unsafe_allow_html=True)
+                        col1, col2, col3, col4 = st.columns(4)
+                        
+                        with col1:
+                            st.markdown(f"""
+                            <div class='kpi-card'>
+                                <div class='kpi-label'>Health Score</div>
+                                <div class='kpi-value'><span class='{score_class}'>{health['score']}</span>/100</div>
+                                <div class='pill' style='margin-top:8px;'><span class='dot {dot_class}'></span>{health['band']}</div>
+                            </div>
+                            """, unsafe_allow_html=True)
+                        
+                        with col2:
+                            st.markdown(f"""
+                            <div class='kpi-card'>
+                                <div class='kpi-label'>Spike Days</div>
+                                <div class='kpi-value'>{health['spike_days']}</div>
+                                <div style='font-size:12px; color:rgba(255,255,255,0.65);'>Days with spike flags</div>
+                            </div>
+                            """, unsafe_allow_html=True)
+                        
+                        with col3:
+                            st.markdown(f"""
+                            <div class='kpi-card'>
+                                <div class='kpi-label'>Missing Events</div>
+                                <div class='kpi-value'>{report_data['missing_events_total']}</div>
+                                <div style='font-size:12px; color:rgba(255,255,255,0.65);'>Total missing rows</div>
+                            </div>
+                            """, unsafe_allow_html=True)
+                        
+                        with col4:
+                            st.markdown(f"""
+                            <div class='kpi-card'>
+                                <div class='kpi-label'>Days in Window</div>
+                                <div class='kpi-value'>{health['days_in_window']}</div>
+                                <div style='font-size:12px; color:rgba(255,255,255,0.65);'>Distinct GA4 dates</div>
+                            </div>
+                            """, unsafe_allow_html=True)
+                        
+                        st.markdown("<br>", unsafe_allow_html=True)
+                        
+                        # Overall Summary Card (matching friend's design)
+                        st.markdown(f"""
+                        <div class='anomaly-card'>
+                            <div style="display:flex; justify-content:space-between; align-items:center;">
+                                <div>
+                                    <div class='section-title'>Overall Summary</div>
+                                    <div style="font-size:22px; font-weight:950; line-height:1.2;">
+                                        {summary['adv_name']} — Tracking reliability snapshot
+                                    </div>
+                                </div>
+                                <div class='pill'>
+                                    <span class='dot {dot_class}'></span>
+                                    <span>{summary['verdict']}</span>
+                                </div>
+                            </div>
+                            <div style="height:12px;"></div>
+                            <div class='verdict-box'>
+                                <div style="font-weight:900; font-size:14px;">Reliability Verdict</div>
+                                <div style="margin-top:6px; font-size:13px; color:rgba(255,255,255,0.85);">
+                                    {summary['verdict_reason']}
+                                </div>
+                            </div>
+                        </div>
+                        """, unsafe_allow_html=True)
+                        
+                        # Top Spike Drivers
+                        if summary.get("top_drivers"):
+                            st.markdown("<div class='section-title'>Spike Drivers (GA4 Channel Dominance)</div>", unsafe_allow_html=True)
+                            driver_df = pd.DataFrame(summary["top_drivers"])
+                            st.dataframe(driver_df, use_container_width=True, hide_index=True)
+                        
+                        st.markdown("<br>", unsafe_allow_html=True)
+                        
+                        # AI Summaries (matching friend's ai-box design)
+                        col1, col2 = st.columns(2)
+                        
+                        with col1:
+                            ai_missing = report_data["ai_summaries"].get("missing", {})
+                            missing_table = report_data.get("missing_table")
+                            missing_count = len(missing_table) if missing_table is not None else 0
+                            st.markdown(f"""
+                            <div class='ai-box'>
+                                <div style="display:flex; justify-content:space-between; align-items:center;">
+                                    <div style="font-size:16px; font-weight:900;">🛑 Missing Floodlights — AI Summary</div>
+                                    <div class='pill'><span class='dot dot-poor'></span>{missing_count} ranges</div>
+                                </div>
+                                <div style="margin-top:12px;">
+                                    <div><b>Summary:</b> {ai_missing.get('summary', 'N/A')}</div>
+                                    <div style="margin-top:8px;"><b>Root Cause:</b> {ai_missing.get('likely_root_cause', 'N/A')}</div>
+                                </div>
+                            </div>
+                            """, unsafe_allow_html=True)
+                            recs = ai_missing.get("recommendations", [])
+                            if recs:
+                                st.markdown("**Recommendations:**")
+                                for r in recs[:5]:
+                                    st.markdown(f"- {r}")
+                            st.markdown("""<a class='btn-gtm' href='https://tagmanager.google.com/' target='_blank'>🟢 Go to Google Tag Manager →</a>""", unsafe_allow_html=True)
+                        
+                        with col2:
+                            ai_spike = report_data["ai_summaries"].get("spike", {})
+                            spike_table = report_data.get("spike_table")
+                            spike_count = len(spike_table) if spike_table is not None else 0
+                            st.markdown(f"""
+                            <div class='ai-box'>
+                                <div style="display:flex; justify-content:space-between; align-items:center;">
+                                    <div style="font-size:16px; font-weight:900;">📈 Spikes — AI Summary</div>
+                                    <div class='pill'><span class='dot dot-fair'></span>{spike_count} spikes</div>
+                                </div>
+                                <div style="margin-top:12px;">
+                                    <div><b>Summary:</b> {ai_spike.get('summary', 'N/A')}</div>
+                                    <div style="margin-top:8px;"><b>Root Cause:</b> {ai_spike.get('likely_root_cause', 'N/A')}</div>
+                                </div>
+                            </div>
+                            """, unsafe_allow_html=True)
+                            recs = ai_spike.get("recommendations", [])
+                            if recs:
+                                st.markdown("**Recommendations:**")
+                                for r in recs[:5]:
+                                    st.markdown(f"- {r}")
+                            st.markdown("""<a class='btn-ga4' href='https://analytics.google.com/' target='_blank'>🔴 Go to GA4 Analytics →</a>""", unsafe_allow_html=True)
+                        
+                        st.markdown("<br>", unsafe_allow_html=True)
+                        
+                        # Charts section
+                        st.markdown("<div class='section-title'>Trends & Visualizations</div>", unsafe_allow_html=True)
+                        charts = report_data.get("charts", {})
+                        
+                        if charts.get("issue_history"):
+                            st.plotly_chart(charts["issue_history"], use_container_width=True)
+                        
+                        if charts.get("ga4_impressions"):
+                            st.plotly_chart(charts["ga4_impressions"], use_container_width=True)
+                        
+                        # Channel Totals
+                        if report_data.get("channel_totals"):
+                            st.markdown("<div class='section-title'>Channel Session Totals</div>", unsafe_allow_html=True)
+                            ch_cols = st.columns(5)
+                            for i, (channel, sessions) in enumerate(report_data["channel_totals"].items()):
+                                with ch_cols[i % 5]:
+                                    st.markdown(f"""
+                                    <div class='kpi-card'>
+                                        <div class='kpi-label'>{channel}</div>
+                                        <div class='kpi-value' style='font-size:20px;'>{sessions:,.0f}</div>
+                                    </div>
+                                    """, unsafe_allow_html=True)
+                        
+                        if charts.get("channel_trend"):
+                            st.plotly_chart(charts["channel_trend"], use_container_width=True)
+                        
+                        st.markdown("<br>", unsafe_allow_html=True)
+                        
+                        # Problem Tables
+                        st.markdown("<div class='section-title'>Detected Problems</div>", unsafe_allow_html=True)
+                        
+                        ptab1, ptab2 = st.tabs(["📈 Spikes", "❌ Missing Data"])
+                        
+                        with ptab1:
+                            spike_table = report_data.get("spike_table")
+                            if spike_table is not None and not spike_table.empty:
+                                st.dataframe(spike_table.head(50), use_container_width=True, hide_index=True)
+                            else:
+                                st.success("No sudden spikes detected!")
+                        
+                        with ptab2:
+                            missing_table = report_data.get("missing_table")
+                            if missing_table is not None and not missing_table.empty:
+                                st.dataframe(missing_table.head(50), use_container_width=True, hide_index=True)
+                            else:
+                                st.success("No missing floodlight data detected!")
+                
                 else:
-                    st.success("No critical issues found!")
-            
-            with tab2:
-                p1_findings = [f for f in findings if f.get('priority') == 'P1']
-                if p1_findings:
-                    for finding in p1_findings:
-                        display_finding(finding)
-                else:
-                    st.success("No high priority issues found!")
-            
-            with tab3:
-                p2_findings = [f for f in findings if f.get('priority') == 'P2']
-                if p2_findings:
-                    for finding in p2_findings:
-                        display_finding(finding)
-                else:
-                    st.success("No medium priority issues found!")
-            
-            with tab4:
-                for finding in findings:
-                    display_finding(finding)
-            
-            st.divider()
-            
-            # Export options
-            st.header("📤 Export")
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                if st.button("📋 Copy Findings to Clipboard"):
-                    findings_text = json.dumps(findings, indent=2)
-                    st.code(findings_text[:500] + "..." if len(findings_text) > 500 else findings_text)
-                    st.success("Findings displayed above - copy manually")
-            
-            with col2:
-                findings_df = pd.DataFrame(findings)
-                csv = findings_df.to_csv(index=False)
-                st.download_button(
-                    "📥 Download as CSV",
-                    csv,
-                    "watchdog_findings.csv",
-                    "text/csv"
-                )
-    
-    else:
-        # Show placeholder content when not running
-        st.info("👆 Click 'Run Account Audit' to start analyzing your ad accounts for setup issues.")
+                    # Placeholder when not running (matching friend's style)
+                    st.markdown("""
+                    <div class='anomaly-card'>
+                        <div style="font-size:18px; font-weight:700;">👆 Select an advertiser and click 'Analyze Data Anomalies'</div>
+                        <div style="margin-top:12px; color:rgba(255,255,255,0.75);">
+                            This tab analyzes Floodlight conversion data for anomalies:
+                        </div>
+                        <div style="margin-top:16px; display:grid; grid-template-columns: repeat(3, 1fr); gap:12px;">
+                            <div class='kpi-card'>
+                                <div style="font-size:20px;">📈</div>
+                                <div style="font-weight:700; margin-top:4px;">Spike Detection</div>
+                                <div style="font-size:12px; color:rgba(255,255,255,0.65); margin-top:4px;">Sudden surges in Floodlight impressions</div>
+                            </div>
+                            <div class='kpi-card'>
+                                <div style="font-size:20px;">❌</div>
+                                <div style="font-weight:700; margin-top:4px;">Missing Data</div>
+                                <div style="font-size:12px; color:rgba(255,255,255,0.65); margin-top:4px;">Floodlight activities that stopped firing</div>
+                            </div>
+                            <div class='kpi-card'>
+                                <div style="font-size:20px;">🤖</div>
+                                <div style="font-weight:700; margin-top:4px;">AI Insights</div>
+                                <div style="font-size:12px; color:rgba(255,255,255,0.65); margin-top:4px;">Root cause analysis via Groq LLM</div>
+                            </div>
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
         
-        st.markdown("""
-        ### What Watchdog Checks:
-        
-        **🔧 Technical Issues (Technician Agent)**
-        - Missing or dead Floodlight pixels
-        - Cookie consent blocking data
-        - GTM and DV360 ID mismatches
-        - Counting method discrepancies
-        - Blocked network calls
-        
-        **📋 Governance Issues (Auditor Agent)**
-        - PII in URL parameters (GDPR risk)
-        - Data retention settings
-        - Google Signals configuration
-        - Campaign naming conventions
-        - Referral exclusion lists
-        - Consent Mode status
-        
-        **💰 Financial Impact (CFO Agent)**
-        - Calculates daily spend at risk
-        - Generates executive narratives
-        - Prioritizes fixes by business impact
-        """)
+        except Exception as e:
+            st.error(f"Error loading anomaly detection: {e}")
+            st.info("Make sure the data files exist in data/anomalies/")
 
 
 if __name__ == "__main__":
     main()
+
