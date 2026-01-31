@@ -10,8 +10,6 @@ Features:
 - Fix recommendations
 """
 import streamlit as st
-import requests
-import json
 import time
 from datetime import datetime
 import pandas as pd
@@ -22,9 +20,21 @@ from pathlib import Path
 backend_path = Path(__file__).parent.parent / "backend"
 sys.path.insert(0, str(backend_path))
 
-from technician_agent import TechnicianAgent
-from auditor_agent import AuditorAgent
-from cfo_agent import CFOAgent
+# Lazy imports to avoid startup issues
+TechnicianAgent = None
+AuditorAgent = None
+CFOAgent = None
+
+def load_agents():
+    """Lazy load agents to avoid import issues during startup."""
+    global TechnicianAgent, AuditorAgent, CFOAgent
+    if TechnicianAgent is None:
+        from technician_agent import TechnicianAgent as TA
+        from auditor_agent import AuditorAgent as AA
+        from cfo_agent import CFOAgent as CA
+        TechnicianAgent = TA
+        AuditorAgent = AA
+        CFOAgent = CA
 
 # Page config
 st.set_page_config(
@@ -151,6 +161,9 @@ def display_finding(finding: dict):
 
 def run_audit_with_streaming(limit: int = 100):
     """Run the audit with streaming display."""
+    
+    # Load agents (lazy loading)
+    load_agents()
     
     # Initialize session state for results
     if 'findings' not in st.session_state:
