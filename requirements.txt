@@ -7,5 +7,8 @@ pandas>=2.0.0
 # LLM - Google Gemini (new API)
 google-genai>=1.0.0
 
+# LLM - Groq (Llama 3)
+groq>=0.5.0
+
 # Environment
 python-dotenv>=1.0.0
